@@ -35,8 +35,55 @@ struct cmd {
 	char *path;
 	unsigned short int argc;
 	char **argv;
-	short int rc;
+	unsigned short int rc;
 };
+
+/**
+ * Función que cueta las ocurrencias de un caracter en un string
+ * @param s String donde se está buscando
+ * @param c Caracter que se está buscando
+ * @return Cantidad de ocurrencias de c en s
+ * @author Esteban De La Fuente Rubio, DeLaF (esteban[at]delaf.cl)
+ * @version 2014-09-01
+ */
+unsigned int str_char_count(const char *s, char c)
+{
+	unsigned short int count = 0, len, i;
+	len = strlen(s);
+	for (i=0; i<len; i++) {
+		if (s[i] == c)
+			count++;
+	}
+	return count;
+}
+
+/**
+ * Función que realiza split sobre un string de acuerdo a cierto delimitador
+ * @param string String donde hacer el split
+ * @param delimiter Delimitador para la extracción (1 caracter)
+ * @return Arreglo con las partes del string divididas por el delimitador
+ * @author Esteban De La Fuente Rubio, DeLaF (esteban[at]delaf.cl)
+ * @version 2014-09-01
+ */
+char **str_split(const char *string, char delimiter)
+{
+	char **argv, *aux, *part, *saveptr = NULL, d[2];
+	unsigned short int argc, i=0;
+	d[0] = delimiter; d[1] = '\0';
+	aux = (char*) malloc(sizeof(char)*(strlen(string)+1));
+	strcpy(aux, string);
+	argc = str_char_count(aux, delimiter) + 1;
+	argv = (char**) malloc(sizeof(char *)*(argc+1));
+	part = strtok_r(aux, d, &saveptr);
+	do {
+		argv[i] = (char *) malloc(strlen(part)+1);
+		strcpy(argv[i], part);
+		i++;
+	} while((part=strtok_r(NULL, d, &saveptr))!=NULL);
+	argv[i] = NULL;
+	free(aux);
+	return argv;
+}
 
 /**
  * Función que permite crear el prompt que se mostrará al usuario
@@ -46,7 +93,7 @@ struct cmd {
  */
 char *shell_prompt()
 {
-	char *user, host[256], *cwd, *prompt;
+	char *user, host[256], *cwd, *prompt, user_t;
 	struct passwd *p = getpwuid(getuid());
 	int prompt_size;
 	user = p->pw_name;
@@ -54,7 +101,8 @@ char *shell_prompt()
 	cwd = getcwd(NULL, 0);
 	prompt_size = 7 + strlen(user) + strlen(host) + strlen(cwd);
 	prompt = (char*) malloc(sizeof(char)*prompt_size);
-	snprintf(prompt, prompt_size, "[%s@%s %s]$ ", user, host, cwd);
+	user_t = p->pw_uid==0 ? '#' : '$';
+	snprintf(prompt, prompt_size, "[%s@%s %s]%c ", user, host, cwd, user_t);
 	free(cwd);
 	return prompt;
 }
@@ -84,8 +132,8 @@ char *shell_get_path()
 char *cmd_get_path(char *cmd)
 {
 	char *cmd_path = NULL, *PATH, *path, *saveptr = NULL;
-	/* si se pasó el comando como ruta absoluta se retorna directamente */
-	if (cmd[0]=='/') {
+	/* si es ruta absoluta o relativa se ve si existe directamente */
+	if (str_char_count(cmd, '/')) {
 		return access(cmd, F_OK) != -1 ? cmd : NULL;
 	}
 	/* obtener posibles rutas donde está el comando y buscar */
@@ -142,54 +190,6 @@ char *cmd_check_path(struct cmd *cmd)
 }
 
 /**
- * Función que cueta las ocurrencias de un caracter en un string
- * @param s String donde se está buscando
- * @param c Caracter que se está buscando
- * @return Cantidad de ocurrencias de c en s
- * @author Esteban De La Fuente Rubio, DeLaF (esteban[at]delaf.cl)
- * @version 2014-09-01
- */
-unsigned int str_char_count(const char *s, char c)
-{
-	unsigned short int count = 0, len, i;
-	len = strlen(s);
-	for (i=0; i<len; i++) {
-		if (s[i] == c)
-			count++;
-	}
-	return count;
-}
-
-/**
- * Función que realiza split sobre un string de acuerdo a cierto delimitador
- * @param string String donde hacer el split
- * @param delimiter Delimitador para la extracción (1 caracter)
- * @return Arreglo con las partes del string divididas por el delimitador
- * @author Esteban De La Fuente Rubio, DeLaF (esteban[at]delaf.cl)
- * @version 2014-09-01
- */
-char **str_split(const char *string, char delimiter)
-{
-	char **argv, *aux, *part, *saveptr = NULL, d[2];
-	unsigned short int argc, i=0;
-	d[0] = delimiter; d[1] = '\0';
-	aux = (char*) malloc(sizeof(char)*(strlen(string)+1));
-	strcpy(aux, string);
-	argc = str_char_count(aux, delimiter) + 1;
-	argv = (char**) malloc(sizeof(char *)*(argc+1));
-	part = strtok_r(aux, d, &saveptr);
-	do {
-		argv[i] = (char *) malloc(strlen(part)+1);
-		strcpy(argv[i], part);
-		i++;
-		
-	} while((part=strtok_r(NULL, d, &saveptr))!=NULL);
-	argv[i] = NULL;
-	free(aux);
-	return argv;
-}
-
-/**
  * Función que crea la estructura necesaria para tener la representacón del cmd
  * @param input String con la entrada del usuario
  * @return Estructura con la representación del comando
@@ -199,6 +199,7 @@ char **str_split(const char *string, char delimiter)
 struct cmd *cmd_parse(char *input)
 {
 	struct cmd *cmd = malloc(sizeof(struct cmd));
+	/* TODO: agregar trim(input) */
 	cmd->argc = str_char_count(input, ' ') + 1;
 	cmd->argv = str_split(input, ' ');
 	cmd->name = cmd->argv[0];
@@ -254,12 +255,14 @@ short int shell_exec(struct cmd *cmd)
 {
 	pid_t pid;
 	int status;
+	struct passwd *p;
 	/* cambiar de directorio */
 	if (!strcmp(cmd->name, "cd")) {
-		if (cmd->argc==0) {
-			return chdir("/");
+		if (cmd->argc==1) {
+			p = getpwuid(getuid());
+			return chdir(p->pw_dir);
 		}
-		return chdir(cmd->argv[0]);
+		return chdir(cmd->argv[1]);
 	}
 	/* obtener ruta (completa/real) del comando */
 	cmd->path = cmd_get_path(cmd->name);
@@ -297,13 +300,13 @@ int main(int argc, char **argv)
 {
 	char *prompt, *input;
 	struct cmd *cmd;
-	short int rc;
+	unsigned short int rc;
 	while (1) {
 		/* mostrar prompt y pedir entrada al usuario */
 		prompt = shell_prompt();
 		input = readline(prompt);
 		free(prompt);
-		if (!input) {
+		if (!input) { /* revisar si hay EOF */
 			printf("exit\n");
 			rc = 0;
 			break;
@@ -316,7 +319,7 @@ int main(int argc, char **argv)
 		/* parsear comando que se debe ejecutar */
 		cmd = cmd_parse(input);
 		/* si se solicita terminar el script */
-		if(!strcmp(cmd->name, "exit")) {
+		if (!strcmp(cmd->name, "exit")) {
 			rc = cmd->argc==2 ? atoi(cmd->argv[1]) : 0;
 			free(input);
 			cmd_free(cmd);
