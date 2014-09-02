@@ -139,6 +139,7 @@ char *cmd_get_path(char *cmd)
 	/* obtener posibles rutas donde está el comando y buscar */
 	PATH = shell_get_path();
 	path = strtok_r(PATH, ":", &saveptr);
+	free(PATH);
 	if (path==NULL)
 		return NULL;
 	do {
@@ -216,12 +217,12 @@ struct cmd *cmd_parse(char *input)
  */
 void cmd_free(struct cmd *cmd)
 {
-/*	int i;*/
-	free(cmd->name);
-/*	if (cmd->path!=NULL)
-		free(cmd->path);*/
-/*	for (i=0; i<cmd->argc; i++)
-		free(cmd->argv[i]);*/
+	int i;
+	if (cmd->path!=NULL)
+		free(cmd->path);
+	for (i=0; i<cmd->argc; i++)
+		free(cmd->argv[i]);
+	free(cmd->argv);
 	free(cmd);
 }
 
